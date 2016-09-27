@@ -8,23 +8,37 @@ import java.nio.channels.AsynchronousServerSocketChannel;
 import java.nio.channels.AsynchronousSocketChannel;
 import java.util.concurrent.*;
 
-import static lab1.ConnectionConstants.*;
+import static lab1.Constants.*;
 
-public class Server {
+class Server {
 
     private ExecutorService taskExecutor = Executors.newCachedThreadPool();
 
     private ConcurrentLinkedQueue<Future<Integer>> futuresHolder = new ConcurrentLinkedQueue<>();
 
-    private void run() {
+    private ServerListener serverListener;
+
+    @FunctionalInterface
+    interface ServerListener {
+
+        void onServerStarted();
+    }
+
+    Server(ServerListener serverListener) {
+        this.serverListener = serverListener;
+
+
+    }
+
+    void run() {
 
         try(AsynchronousServerSocketChannel asyncServerSocket = AsynchronousServerSocketChannel.open()) {
             if (asyncServerSocket.isOpen()) {
 
                 asyncServerSocket.bind(new InetSocketAddress(IP, PORT));
+                serverListener.onServerStarted();
 
                 while (true) {
-                    System.out.println("waiting for connections...");
                     Future<AsynchronousSocketChannel> asyncSocket = asyncServerSocket.accept();
 
                     try {
@@ -65,9 +79,5 @@ public class Server {
         asyncSocket.close();
 
         return byteBuffer.getInt();
-    }
-
-    public static void main(String[] args) {
-        new Server().run();
     }
 }

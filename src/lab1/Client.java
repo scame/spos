@@ -8,12 +8,14 @@ import java.nio.IntBuffer;
 import java.nio.channels.AsynchronousSocketChannel;
 import java.util.concurrent.ExecutionException;
 
-import static lab1.ConnectionConstants.IP;
-import static lab1.ConnectionConstants.PORT;
+import static lab1.Constants.IP;
+import static lab1.Constants.PORT;
 
 public class Client {
 
     private ByteBuffer byteBuffer = ByteBuffer.allocateDirect(1024);
+
+    private static int ARGUMENT_VAL;
 
     private void run() {
 
@@ -24,7 +26,7 @@ public class Client {
 
                 if (connect == null) {
                     IntBuffer intBuffer = byteBuffer.asIntBuffer();
-                    intBuffer.put(10);
+                    intBuffer.put(ARGUMENT_VAL);
 
                     asyncSocketChannel.write(byteBuffer).get();
                 } else {
@@ -40,6 +42,11 @@ public class Client {
     }
 
     public static void main(String[] args) {
+
+        if (args.length > 0) {
+            ARGUMENT_VAL = Integer.valueOf(args[0]);
+        }
+
         new Client().run();
     }
 }
