@@ -4,7 +4,7 @@ class Constants {
 
     static final String IP = "127.0.0.1";
 
-    static final int PORT = 6666;
+    static final int PORT = 5325;
 
     static final String PROJECT_DIR = "/home/scame/IdeaProjects/spos/out/production/spos";
 

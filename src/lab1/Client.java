@@ -7,6 +7,7 @@ import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.nio.channels.AsynchronousSocketChannel;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 import static lab1.Constants.IP;
 import static lab1.Constants.PORT;
@@ -25,6 +26,8 @@ public class Client {
                 Void connect = asyncSocketChannel.connect(new InetSocketAddress(IP, PORT)).get();
 
                 if (connect == null) {
+
+                    TimeUnit.SECONDS.sleep(20);
                     IntBuffer intBuffer = byteBuffer.asIntBuffer();
                     intBuffer.put(ARGUMENT_VAL);
 

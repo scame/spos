@@ -18,6 +18,8 @@ class Server {
 
     private ServerListener serverListener;
 
+    private Future<Void> serverFuture;
+
     @FunctionalInterface
     interface ServerListener {
 
@@ -26,12 +28,13 @@ class Server {
 
     Server(ServerListener serverListener) {
         this.serverListener = serverListener;
-
-
     }
 
     void run() {
+       serverFuture = taskExecutor.submit(this::handleServerSocket);
+    }
 
+    private Void handleServerSocket() {
         try(AsynchronousServerSocketChannel asyncServerSocket = AsynchronousServerSocketChannel.open()) {
             if (asyncServerSocket.isOpen()) {
 
@@ -42,9 +45,9 @@ class Server {
                     Future<AsynchronousSocketChannel> asyncSocket = asyncServerSocket.accept();
 
                     try {
-                        futuresHolder.add(taskExecutor.submit(createWorkerTask(asyncSocket.get())));
+                        futuresHolder.add(taskExecutor.submit(createSocketHandlerTask(asyncSocket.get())));
                     } catch (InterruptedException | ExecutionException e) {
-
+                        System.out.println("Interrupted/exec exception");
                         taskExecutor.shutdown();
                         while (!taskExecutor.isTerminated()) { }
 
@@ -59,9 +62,11 @@ class Server {
         } catch (IOException e) {
             e.printStackTrace();
         }
+
+        return null;
     }
 
-    private Callable<Integer> createWorkerTask(AsynchronousSocketChannel asyncSocket) {
+    private Callable<Integer> createSocketHandlerTask(AsynchronousSocketChannel asyncSocket) {
         return () -> handleSocketChannel(asyncSocket);
     }
 
@@ -79,5 +84,9 @@ class Server {
         asyncSocket.close();
 
         return byteBuffer.getInt();
+    }
+
+    void stop() {
+        System.out.println("gonna stop");
     }
 }
