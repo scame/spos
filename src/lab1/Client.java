@@ -6,6 +6,7 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.nio.channels.AsynchronousSocketChannel;
+import java.util.Random;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
@@ -27,9 +28,9 @@ public class Client {
 
                 if (connect == null) {
 
-                    TimeUnit.SECONDS.sleep(20);
+                    TimeUnit.SECONDS.sleep(new Random().nextInt(10));
                     IntBuffer intBuffer = byteBuffer.asIntBuffer();
-                    intBuffer.put(ARGUMENT_VAL);
+                    intBuffer.put(new Random().nextInt(ARGUMENT_VAL + 15));
 
                     asyncSocketChannel.write(byteBuffer).get();
                 } else {
@@ -45,7 +46,6 @@ public class Client {
     }
 
     public static void main(String[] args) {
-
         if (args.length > 0) {
             ARGUMENT_VAL = Integer.valueOf(args[0]);
         }

@@ -13,25 +13,25 @@ import java.util.concurrent.TimeUnit;
 import static lab1.Constants.*;
 
 /**
- * represents a server entity
+ * server process
  * makes invocation of client processes */
 
-public class ApplicationManager {
+public class ApplicationManager implements Server.ServerListener {
+
+    private static final int SCHEDULER_PERIOD = 3;
+    private static final int INITIAL_DELAY = 3;
 
     private enum DialogOptions { CONTINUE, CONTINUE_WITHOUT_PROMPT, CANCEL }
 
     private enum CancellationMode { KEY_PRESS, POP_UP_DIALOG }
 
-    private static final int SCHEDULER_PERIOD = 5;
-    private static final int INITIAL_DELAY = 5;
+    private CancellationMode cancellationMode;
 
     private ScheduledExecutorService scheduledExecutor = Executors.newScheduledThreadPool(1);
 
-    private static int CLIENTS_NUMBER;
+    private int clientNumber;
 
-    private static int ARGUMENT_VAL;
-
-    private CancellationMode cancellationMode;
+    private int argumentVal;
 
     private Server server;
 
@@ -43,8 +43,30 @@ public class ApplicationManager {
         appManager.runCancellationModeHandler();
     }
 
+    @Override
+    public void onServerStarted() {
+        runClients();
+    }
+
+    @Override
+    synchronized public void onCompletedComputation(int result, boolean shortCircuited) {
+        if (shortCircuited) {
+            System.out.println("result (short-circuit): " + result);
+        } else {
+            System.out.println("result: " + result);
+        }
+
+        scheduledExecutor.shutdownNow();
+    }
+
+    @Override
+    synchronized public void onFailReported(String cause) {
+        System.out.println("fail caused by: " + cause);
+        scheduledExecutor.shutdownNow();
+    }
+
     private void runServer() {
-        server = new Server(this::runClients);
+        server = new Server(this, clientNumber);
         server.run();
     }
 
@@ -52,7 +74,7 @@ public class ApplicationManager {
     private void runClients() {
         ProcessBuilder processBuilder = constructProcessBuilder();
 
-        for (int i = 0; i < CLIENTS_NUMBER; i++) {
+        for (int i = 0; i < clientNumber; i++) {
             try {
                 processBuilder.start();
             } catch (IOException e) {
@@ -64,7 +86,7 @@ public class ApplicationManager {
     private ProcessBuilder constructProcessBuilder() {
         ProcessBuilder processBuilder = new ProcessBuilder();
         processBuilder.directory(new File(PROJECT_DIR));
-        processBuilder.command(JAVA, CLIENT_PATH, String.valueOf(ARGUMENT_VAL));
+        processBuilder.command(JAVA, CLIENT_PATH, String.valueOf(argumentVal));
 
         return processBuilder;
     }
@@ -76,10 +98,10 @@ public class ApplicationManager {
         cancellationMode = (scanner.nextInt() == 1 ? CancellationMode.KEY_PRESS : CancellationMode.POP_UP_DIALOG);
         scanner.nextLine();
         System.out.print("number of functions: ");
-        CLIENTS_NUMBER = scanner.nextInt();
+        clientNumber = scanner.nextInt();
         scanner.nextLine();
         System.out.print("argument: ");
-        ARGUMENT_VAL = scanner.nextInt();
+        argumentVal = scanner.nextInt();
     }
 
     private void runCancellationModeHandler() {
@@ -115,27 +137,29 @@ public class ApplicationManager {
     }
 
     private void runPopupsScheduler() {
-        scheduledExecutor.scheduleWithFixedDelay(() -> {
-            Scanner scanner = new Scanner(System.in);
-
-            System.out.println("continue(1), continue without prompt(2), cancel(3)");
-            int readValue = scanner.nextInt();
-
-            switch (readValue) {
-                case 1:
-                    handlePopupMessage(DialogOptions.CONTINUE);
-                    break;
-                case 2:
-                    handlePopupMessage(DialogOptions.CONTINUE_WITHOUT_PROMPT);
-                    break;
-                case 3:
-                    handlePopupMessage(DialogOptions.CANCEL);
-                    break;
-            }
-        }, INITIAL_DELAY, SCHEDULER_PERIOD, TimeUnit.SECONDS);
+        scheduledExecutor.scheduleWithFixedDelay(this::displayPopup, INITIAL_DELAY, SCHEDULER_PERIOD, TimeUnit.SECONDS);
     }
 
-    private void handlePopupMessage(DialogOptions dialogOptions) {
+    synchronized private void displayPopup() {
+        Scanner scanner = new Scanner(System.in);
+
+        System.out.println("continue(1), continue without prompt(2), cancel(3)");
+        int readValue = scanner.nextInt();
+
+        switch (readValue) {
+            case 1:
+                handlePopupMessage(DialogOptions.CONTINUE);
+                break;
+            case 2:
+                handlePopupMessage(DialogOptions.CONTINUE_WITHOUT_PROMPT);
+                break;
+            case 3:
+                handlePopupMessage(DialogOptions.CANCEL);
+                break;
+        }
+    }
+
+    synchronized private void handlePopupMessage(DialogOptions dialogOptions) {
         switch (dialogOptions) {
             case CONTINUE:
                 // do nothing
