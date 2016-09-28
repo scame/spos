@@ -9,27 +9,31 @@ import java.util.Scanner;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static lab1.Constants.*;
 
 /**
  * server process
  * makes invocation of client processes */
-
-public class ApplicationManager implements Server.ServerListener {
+public class ApplicationManager implements ServerListener {
 
     private static final int SCHEDULER_PERIOD = 3;
     private static final int INITIAL_DELAY = 3;
 
-    private enum DialogOptions { CONTINUE, CONTINUE_WITHOUT_PROMPT, CANCEL }
+    private final ScheduledExecutorService scheduledExecutor = Executors.newScheduledThreadPool(1);
+
+    // used to lock computation output till the prompt is closed
+    private final Lock promptLock = new ReentrantLock(true);
+
+    private enum PromptOptions { CONTINUE, CONTINUE_WITHOUT_PROMPT, CANCEL }
 
     private enum CancellationMode { KEY_PRESS, POP_UP_DIALOG }
 
     private CancellationMode cancellationMode;
 
-    private ScheduledExecutorService scheduledExecutor = Executors.newScheduledThreadPool(1);
-
-    private int clientNumber;
+    private int clientsNumber;
 
     private int argumentVal;
 
@@ -38,7 +42,7 @@ public class ApplicationManager implements Server.ServerListener {
     public static void main(String[] args) throws IOException, InterruptedException {
         ApplicationManager appManager = new ApplicationManager();
 
-        appManager.runUserInteractor();
+        appManager.runInteractor();
         appManager.runServer();
         appManager.runCancellationModeHandler();
     }
@@ -49,32 +53,43 @@ public class ApplicationManager implements Server.ServerListener {
     }
 
     @Override
-    synchronized public void onCompletedComputation(int result, boolean shortCircuited) {
-        if (shortCircuited) {
-            System.out.println("result (short-circuit): " + result);
-        } else {
-            System.out.println("result: " + result);
-        }
+    public void onCompletedComputation(int result, boolean isShortCircuited) {
 
-        scheduledExecutor.shutdownNow();
+        promptLock.lock();
+        try {
+            if (isShortCircuited) {
+                System.out.println("result (short-circuit): " + result);
+            } else {
+                System.out.println("result: " + result);
+            }
+        } finally {
+            scheduledExecutor.shutdownNow();
+            promptLock.unlock();
+        }
     }
 
     @Override
-    synchronized public void onFailReported(String cause) {
-        System.out.println("fail caused by: " + cause);
-        scheduledExecutor.shutdownNow();
+    public void onFailReported(String cause) {
+
+        promptLock.lock();
+        try {
+            System.out.println("failure caused by: " + cause);
+        } finally {
+            scheduledExecutor.shutdownNow();
+            promptLock.unlock();
+        }
     }
 
     private void runServer() {
-        server = new Server(this, clientNumber);
-        server.run();
+        server = new Server(this, clientsNumber);
+        server.runServer();
     }
 
-    // gets called when the server was successfully started
+    // gets called when server was successfully started
     private void runClients() {
         ProcessBuilder processBuilder = constructProcessBuilder();
 
-        for (int i = 0; i < clientNumber; i++) {
+        for (int i = 0; i < clientsNumber; i++) {
             try {
                 processBuilder.start();
             } catch (IOException e) {
@@ -91,23 +106,23 @@ public class ApplicationManager implements Server.ServerListener {
         return processBuilder;
     }
 
-    private void runUserInteractor() {
+    private void runInteractor() {
         Scanner scanner = new Scanner(System.in);
 
-        System.out.printf("cancellation mode (1 - btn press, 2 - dialog window): ");
+        System.out.printf("cancellation mode (1 - btn press, 2 - prompt): ");
         cancellationMode = (scanner.nextInt() == 1 ? CancellationMode.KEY_PRESS : CancellationMode.POP_UP_DIALOG);
         scanner.nextLine();
         System.out.print("number of functions: ");
-        clientNumber = scanner.nextInt();
+        clientsNumber = scanner.nextInt();
         scanner.nextLine();
         System.out.print("argument: ");
         argumentVal = scanner.nextInt();
     }
 
     private void runCancellationModeHandler() {
-        if (cancellationMode.equals(CancellationMode.KEY_PRESS)) {
+        if (cancellationMode == CancellationMode.KEY_PRESS) {
             runKeyPressDaemon();
-        } else if (cancellationMode.equals(CancellationMode.POP_UP_DIALOG)) {
+        } else if (cancellationMode == CancellationMode.POP_UP_DIALOG) {
             runPopupsScheduler();
         }
     }
@@ -126,7 +141,9 @@ public class ApplicationManager implements Server.ServerListener {
                 }
 
                 if (message != null && message.equals("q")) {
-                    server.stop();
+                    // it's definitely bad if scheduler decides to reschedule here
+                    // because output lock happens only inside stop server method
+                    server.stopServer();
                     break;
                 }
             }
@@ -137,30 +154,36 @@ public class ApplicationManager implements Server.ServerListener {
     }
 
     private void runPopupsScheduler() {
-        scheduledExecutor.scheduleWithFixedDelay(this::displayPopup, INITIAL_DELAY, SCHEDULER_PERIOD, TimeUnit.SECONDS);
+        scheduledExecutor.scheduleWithFixedDelay(this::displayPrompt, INITIAL_DELAY, SCHEDULER_PERIOD, TimeUnit.SECONDS);
     }
 
-    synchronized private void displayPopup() {
-        Scanner scanner = new Scanner(System.in);
+    private void displayPrompt() {
 
-        System.out.println("continue(1), continue without prompt(2), cancel(3)");
-        int readValue = scanner.nextInt();
+        promptLock.lock();
+        try {
+            Scanner scanner = new Scanner(System.in);
 
-        switch (readValue) {
-            case 1:
-                handlePopupMessage(DialogOptions.CONTINUE);
-                break;
-            case 2:
-                handlePopupMessage(DialogOptions.CONTINUE_WITHOUT_PROMPT);
-                break;
-            case 3:
-                handlePopupMessage(DialogOptions.CANCEL);
-                break;
+            System.out.print("continue(1), continue without prompt(2), cancel(3): ");
+            int readValue = scanner.nextInt();
+
+            switch (readValue) {
+                case 1:
+                    handlePrompt(PromptOptions.CONTINUE);
+                    break;
+                case 2:
+                    handlePrompt(PromptOptions.CONTINUE_WITHOUT_PROMPT);
+                    break;
+                case 3:
+                    handlePrompt(PromptOptions.CANCEL);
+                    break;
+            }
+        } finally {
+            promptLock.unlock();
         }
     }
 
-    synchronized private void handlePopupMessage(DialogOptions dialogOptions) {
-        switch (dialogOptions) {
+    private void handlePrompt(PromptOptions promptOptions) {
+        switch (promptOptions) {
             case CONTINUE:
                 // do nothing
                 break;
@@ -169,7 +192,7 @@ public class ApplicationManager implements Server.ServerListener {
                 break;
             case CANCEL:
                 scheduledExecutor.shutdownNow();
-                server.stop();
+                server.stopServer();
                 break;
         }
     }

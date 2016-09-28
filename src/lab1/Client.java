@@ -10,12 +10,13 @@ import java.util.Random;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
+import static lab1.Constants.BUFFER_SIZE;
 import static lab1.Constants.IP;
 import static lab1.Constants.PORT;
 
 public class Client {
 
-    private ByteBuffer byteBuffer = ByteBuffer.allocateDirect(1024);
+    private final ByteBuffer byteBuffer = ByteBuffer.allocateDirect(BUFFER_SIZE);
 
     private static int ARGUMENT_VAL;
 
@@ -28,9 +29,9 @@ public class Client {
 
                 if (connect == null) {
 
-                    TimeUnit.SECONDS.sleep(new Random().nextInt(10));
+                    TimeUnit.SECONDS.sleep(new Random().nextInt(6));
                     IntBuffer intBuffer = byteBuffer.asIntBuffer();
-                    intBuffer.put(new Random().nextInt(ARGUMENT_VAL + 15));
+                    intBuffer.put(new Random().nextInt(8));
 
                     asyncSocketChannel.write(byteBuffer).get();
                 } else {

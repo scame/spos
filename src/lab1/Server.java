@@ -1,11 +1,14 @@
 package lab1;
 
 
+import jcip.ThreadSafe;
+
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousServerSocketChannel;
 import java.nio.channels.AsynchronousSocketChannel;
+import java.util.Objects;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -16,13 +19,17 @@ class Server {
 
     private static final int SHORT_CIRCUIT_CONDITION = 0;
 
-    private CopyOnWriteArrayList<Integer> valuesContainer = new CopyOnWriteArrayList<>();
+    private static final Integer INTERRUPTION_VALUE = null;
 
-    private ExecutorService taskExecutor = Executors.newCachedThreadPool();
+    static final Lock syncLock = new ReentrantLock();
 
-    private CompletionService<Integer> completionService = new ExecutorCompletionService<>(taskExecutor);
+    private final Lock transferLock = new ReentrantLock();
 
-    private Lock lock = new ReentrantLock();
+    private final CopyOnWriteArrayList<Integer> valuesContainer = new CopyOnWriteArrayList<>();
+
+    private final ExecutorService taskExecutor = Executors.newCachedThreadPool();
+
+    private final CompletionService<Integer> completionService = new ExecutorCompletionService<>(taskExecutor);
 
     private ServerListener serverListener;
 
@@ -30,21 +37,12 @@ class Server {
 
     private int clientsNumber;
 
-    interface ServerListener {
-
-        void onServerStarted();
-
-        void onFailReported(String cause);
-
-        void onCompletedComputation(int result, boolean shortCircuited);
-    }
-
     Server(ServerListener serverListener, int clientsNumber) {
         this.clientsNumber = clientsNumber;
         this.serverListener = serverListener;
     }
 
-    void run() {
+    void runServer() {
         runFuturesConsumer();
         serverFuture = taskExecutor.submit(this::handleServerSocket);
     }
@@ -87,19 +85,28 @@ class Server {
         ByteBuffer byteBuffer = ByteBuffer.allocateDirect(BUFFER_SIZE);
 
         try {
-            asyncSocket.read(byteBuffer).get();
-            byteBuffer.flip();
+            prepareBuffer(asyncSocket, byteBuffer);
         } catch (InterruptedException | ExecutionException e) {
-            return null;
+            return INTERRUPTION_VALUE;
         } finally {
-            try {
-                asyncSocket.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+            closeClientSocket(asyncSocket);
         }
 
         return byteBuffer.getInt();
+    }
+
+    private void closeClientSocket(AsynchronousSocketChannel asyncSocket) {
+        try {
+            asyncSocket.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void prepareBuffer(AsynchronousSocketChannel socket, ByteBuffer byteBuffer)
+            throws InterruptedException, ExecutionException {
+        socket.read(byteBuffer).get();
+        byteBuffer.flip();
     }
 
     private void runFuturesConsumer() {
@@ -109,14 +116,14 @@ class Server {
                     Future<Integer> consumedFuture = completionService.take();
                     Integer consumedValue = consumedFuture.get();
 
-                    if (consumedValue == null) {
-                        break; // clients were interrupted, stop consuming
-                    }
+                    if (Objects.equals(consumedValue, INTERRUPTION_VALUE)) {
+                        break;  // clients were interrupted, stop futures consuming
+                    }           // happens after cancelServerFuture procedure call
 
                     valuesContainer.add(consumedValue);
 
                     if (consumedValue == SHORT_CIRCUIT_CONDITION) {
-                        cancelServerFuture(); // says clients to stop computations
+                        cancelServerFuture();
                         transferResult(true, null);
                         break;
                     }
@@ -132,40 +139,45 @@ class Server {
         }).start();
     }
 
-    void stop() {
-        cancelServerFuture();
 
-        if (clientsNumber == valuesContainer.size()) {
-            transferResult(false, null);
-        } else {
-            transferResult(false, "stopped before the completion");
-        }
-    }
-
-    private void transferResult(boolean shortCircuited, String failReport) {
-
-        // simple lock/sync will produce a deadlock (if computations were completed during the prompt)
-        if (lock.tryLock()) {
+    void stopServer() {
+        if (syncLock.tryLock()) {
             try {
-                if (failReport != null) {
-                    serverListener.onFailReported(failReport);
-                    return;
-                }
-
-                if (shortCircuited) {
-                    serverListener.onCompletedComputation(SHORT_CIRCUIT_CONDITION, true);
-                } else {
-                    serverListener.onCompletedComputation(valuesContainer.stream()
-                            .reduce(1, (accumulator, elem) -> accumulator * elem), false);
-                }
+                transferResult(false, "stopped before the completion");
             } finally {
-                cancelServerFuture();
-                lock.unlock();
+                syncLock.unlock();
             }
         }
     }
 
-    private void cancelServerFuture() {
+    private void transferResult(boolean isShortCircuited, String failureReport) {
+
+        // simple lock/sync will produce a deadlock (if computations were completed during the prompt)
+        if (syncLock.tryLock()) {
+            try {
+                if (transferLock.tryLock()) {
+                    try {
+                        if (failureReport != null) {
+                            serverListener.onFailReported(failureReport);
+                        } else if (isShortCircuited) {
+                            serverListener.onCompletedComputation(SHORT_CIRCUIT_CONDITION, true);
+                        } else {
+                            serverListener.onCompletedComputation(valuesContainer.stream()
+                                    .reduce(1, (accumulator, elem) -> accumulator * elem), false);
+                        }
+                    } finally {
+                        cancelServerFuture();
+                        transferLock.unlock();
+                    }
+                }
+            } finally {
+                syncLock.unlock();
+            }
+        }
+    }
+
+    @ThreadSafe // not necessary (cancel won't make any hurt), but recommended
+    synchronized private void cancelServerFuture() {
         if (!serverFuture.isCancelled()) {
             serverFuture.cancel(true);
         }
