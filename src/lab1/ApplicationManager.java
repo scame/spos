@@ -24,7 +24,7 @@ public class ApplicationManager implements ServerListener {
 
     private final ScheduledExecutorService scheduledExecutor = Executors.newScheduledThreadPool(1);
 
-    // used to lock computation output till the prompt is closed
+    // used to lock computation output till a prompt is closed
     private final Lock promptLock = new ReentrantLock(true);
 
     private enum PromptOptions { CONTINUE, CONTINUE_WITHOUT_PROMPT, CANCEL }
@@ -69,7 +69,7 @@ public class ApplicationManager implements ServerListener {
     }
 
     @Override
-    public void onFailReported(String cause) {
+    public void onFailureReported(String cause) {
 
         promptLock.lock();
         try {
@@ -127,7 +127,6 @@ public class ApplicationManager implements ServerListener {
         }
     }
 
-    // runs in the background waiting for someone to enter "q"
     private void runKeyPressDaemon() {
         Thread thread = new Thread(() -> {
             BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(System.in));
@@ -143,6 +142,7 @@ public class ApplicationManager implements ServerListener {
                 if (message != null && message.equals("q")) {
                     // it's definitely bad if scheduler decides to reschedule here
                     // because output lock happens only inside stop server method
+                    // (trying to lock right after readLine procedure creates possibility of losing the result)
                     server.stopServer();
                     break;
                 }
@@ -185,13 +185,11 @@ public class ApplicationManager implements ServerListener {
     private void handlePrompt(PromptOptions promptOptions) {
         switch (promptOptions) {
             case CONTINUE:
-                // do nothing
                 break;
             case CONTINUE_WITHOUT_PROMPT:
                 scheduledExecutor.shutdownNow();
                 break;
             case CANCEL:
-                scheduledExecutor.shutdownNow();
                 server.stopServer();
                 break;
         }

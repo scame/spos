@@ -21,9 +21,7 @@ class Server {
 
     private static final Integer INTERRUPTION_VALUE = null;
 
-    static final Lock syncLock = new ReentrantLock();
-
-    private final Lock transferLock = new ReentrantLock();
+    private final Lock outputLock = new ReentrantLock();
 
     private final CopyOnWriteArrayList<Integer> valuesContainer = new CopyOnWriteArrayList<>();
 
@@ -116,6 +114,7 @@ class Server {
                     Future<Integer> consumedFuture = completionService.take();
                     Integer consumedValue = consumedFuture.get();
 
+                    System.out.println("consumed: " + consumedValue);
                     if (Objects.equals(consumedValue, INTERRUPTION_VALUE)) {
                         break;  // clients were interrupted, stop futures consuming
                     }           // happens after cancelServerFuture procedure call
@@ -141,43 +140,33 @@ class Server {
 
 
     void stopServer() {
-        if (syncLock.tryLock()) {
-            try {
-                transferResult(false, "stopped before the completion");
-            } finally {
-                syncLock.unlock();
-            }
+        if (outputLock.tryLock()) {
+            transferResult(false, "stopped before the completion");
         }
     }
 
     private void transferResult(boolean isShortCircuited, String failureReport) {
 
         // simple lock/sync will produce a deadlock (if computations were completed during the prompt)
-        if (syncLock.tryLock()) {
+        if (outputLock.tryLock()) {
             try {
-                if (transferLock.tryLock()) {
-                    try {
-                        if (failureReport != null) {
-                            serverListener.onFailReported(failureReport);
-                        } else if (isShortCircuited) {
-                            serverListener.onCompletedComputation(SHORT_CIRCUIT_CONDITION, true);
-                        } else {
-                            serverListener.onCompletedComputation(valuesContainer.stream()
-                                    .reduce(1, (accumulator, elem) -> accumulator * elem), false);
-                        }
-                    } finally {
-                        cancelServerFuture();
-                        transferLock.unlock();
-                    }
+                if (failureReport != null) {
+                    serverListener.onFailureReported(failureReport);
+                } else if (isShortCircuited) {
+                    serverListener.onCompletedComputation(SHORT_CIRCUIT_CONDITION, true);
+                } else {
+                    serverListener.onCompletedComputation(valuesContainer.stream()
+                            .reduce(1, (accumulator, elem) -> accumulator * elem), false);
                 }
             } finally {
-                syncLock.unlock();
+                cancelServerFuture();
+                outputLock.unlock();
             }
         }
     }
 
-    @ThreadSafe // not necessary (cancel won't make any hurt), but recommended
-    synchronized private void cancelServerFuture() {
+    @ThreadSafe // executor's implementation of Future interface guarantees thread-safety
+    private void cancelServerFuture() {
         if (!serverFuture.isCancelled()) {
             serverFuture.cancel(true);
         }
