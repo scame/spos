@@ -21,7 +21,7 @@ class Server {
 
     private static final Integer INTERRUPTION_VALUE = null;
 
-    private final Lock outputLock = new ReentrantLock();
+    private final Lock transferLock = new ReentrantLock();
 
     private final CopyOnWriteArrayList<Integer> valuesContainer = new CopyOnWriteArrayList<>();
 
@@ -114,7 +114,6 @@ class Server {
                     Future<Integer> consumedFuture = completionService.take();
                     Integer consumedValue = consumedFuture.get();
 
-                    System.out.println("consumed: " + consumedValue);
                     if (Objects.equals(consumedValue, INTERRUPTION_VALUE)) {
                         break;  // clients were interrupted, stop futures consuming
                     }           // happens after cancelServerFuture procedure call
@@ -122,13 +121,12 @@ class Server {
                     valuesContainer.add(consumedValue);
 
                     if (consumedValue == SHORT_CIRCUIT_CONDITION) {
-                        cancelServerFuture();
-                        transferResult(true, null);
+                        transferResult(true);
                         break;
                     }
 
                     if (valuesContainer.size() == clientsNumber) {
-                        transferResult(false, null);
+                        transferResult(false);
                         break;
                     }
                 }
@@ -138,30 +136,37 @@ class Server {
         }).start();
     }
 
+    private void transferResult(boolean isShortCircuited) {
+        if (transferLock.tryLock()) {
+            try {
+                transferResult(isShortCircuited, null);
+            } finally {
+                cancelServerFuture();
+                transferLock.unlock();
+            }
+        }
+    }
 
     void stopServer() {
-        if (outputLock.tryLock()) {
-            transferResult(false, "stopped before the completion");
+        if (transferLock.tryLock()) {
+            try {
+                transferResult(false, "stopped before the completion");
+            } finally {
+                cancelServerFuture();
+                transferLock.unlock();
+            }
         }
     }
 
     private void transferResult(boolean isShortCircuited, String failureReport) {
 
-        // simple lock/sync will produce a deadlock (if computations were completed during the prompt)
-        if (outputLock.tryLock()) {
-            try {
-                if (failureReport != null) {
-                    serverListener.onFailureReported(failureReport);
-                } else if (isShortCircuited) {
-                    serverListener.onCompletedComputation(SHORT_CIRCUIT_CONDITION, true);
-                } else {
-                    serverListener.onCompletedComputation(valuesContainer.stream()
-                            .reduce(1, (accumulator, elem) -> accumulator * elem), false);
-                }
-            } finally {
-                cancelServerFuture();
-                outputLock.unlock();
-            }
+        if (failureReport != null) {
+            serverListener.onFailureReported(failureReport);
+        } else if (isShortCircuited) {
+            serverListener.onCompletedComputation(SHORT_CIRCUIT_CONDITION, true);
+        } else {
+            serverListener.onCompletedComputation(valuesContainer.stream()
+                    .reduce(1, (accumulator, elem) -> accumulator * elem), false);
         }
     }
 

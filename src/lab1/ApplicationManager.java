@@ -2,7 +2,6 @@ package lab1;
 
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.Scanner;
@@ -12,24 +11,22 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
-import static lab1.Constants.*;
 
-/**
- * server process
- * makes invocation of client processes */
 public class ApplicationManager implements ServerListener {
 
     private static final int SCHEDULER_PERIOD = 3;
     private static final int INITIAL_DELAY = 3;
 
+    private final ChildProcessesRunner processesRunner = new ChildProcessesRunner();
+
     private final ScheduledExecutorService scheduledExecutor = Executors.newScheduledThreadPool(1);
 
-    // used to lock computation output till a prompt is closed
+    // used to lock computation output till the prompt is closed
     private final Lock promptLock = new ReentrantLock(true);
 
     private enum PromptOptions { CONTINUE, CONTINUE_WITHOUT_PROMPT, CANCEL }
 
-    private enum CancellationMode { KEY_PRESS, POP_UP_DIALOG }
+    private enum CancellationMode { KEY_PRESS, PROMPT}
 
     private CancellationMode cancellationMode;
 
@@ -85,32 +82,16 @@ public class ApplicationManager implements ServerListener {
         server.runServer();
     }
 
-    // gets called when server was successfully started
+    // gets called when the server was successfully started
     private void runClients() {
-        ProcessBuilder processBuilder = constructProcessBuilder();
-
-        for (int i = 0; i < clientsNumber; i++) {
-            try {
-                processBuilder.start();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-    }
-
-    private ProcessBuilder constructProcessBuilder() {
-        ProcessBuilder processBuilder = new ProcessBuilder();
-        processBuilder.directory(new File(PROJECT_DIR));
-        processBuilder.command(JAVA, CLIENT_PATH, String.valueOf(argumentVal));
-
-        return processBuilder;
+       processesRunner.runProcesses(clientsNumber, 30, argumentVal);
     }
 
     private void runInteractor() {
         Scanner scanner = new Scanner(System.in);
 
         System.out.printf("cancellation mode (1 - btn press, 2 - prompt): ");
-        cancellationMode = (scanner.nextInt() == 1 ? CancellationMode.KEY_PRESS : CancellationMode.POP_UP_DIALOG);
+        cancellationMode = (scanner.nextInt() == 1 ? CancellationMode.KEY_PRESS : CancellationMode.PROMPT);
         scanner.nextLine();
         System.out.print("number of functions: ");
         clientsNumber = scanner.nextInt();
@@ -122,8 +103,8 @@ public class ApplicationManager implements ServerListener {
     private void runCancellationModeHandler() {
         if (cancellationMode == CancellationMode.KEY_PRESS) {
             runKeyPressDaemon();
-        } else if (cancellationMode == CancellationMode.POP_UP_DIALOG) {
-            runPopupsScheduler();
+        } else if (cancellationMode == CancellationMode.PROMPT) {
+            runPromptScheduler();
         }
     }
 
@@ -141,7 +122,7 @@ public class ApplicationManager implements ServerListener {
 
                 if (message != null && message.equals("q")) {
                     // it's definitely bad if scheduler decides to reschedule here
-                    // because output lock happens only inside stop server method
+                    // because output lock happens only inside stopServer method
                     // (trying to lock right after readLine procedure creates possibility of losing the result)
                     server.stopServer();
                     break;
@@ -153,7 +134,7 @@ public class ApplicationManager implements ServerListener {
         thread.start();
     }
 
-    private void runPopupsScheduler() {
+    private void runPromptScheduler() {
         scheduledExecutor.scheduleWithFixedDelay(this::displayPrompt, INITIAL_DELAY, SCHEDULER_PERIOD, TimeUnit.SECONDS);
     }
 

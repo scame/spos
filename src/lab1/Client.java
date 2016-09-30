@@ -20,6 +20,8 @@ public class Client {
 
     private static int ARGUMENT_VAL;
 
+    private static int MAX_DURATION;
+
     private void run() {
 
         try(AsynchronousSocketChannel asyncSocketChannel = AsynchronousSocketChannel.open()) {
@@ -29,9 +31,9 @@ public class Client {
 
                 if (connect == null) {
 
-                    TimeUnit.SECONDS.sleep(new Random().nextInt(6));
+                    TimeUnit.SECONDS.sleep(new Random().nextInt(MAX_DURATION));
                     IntBuffer intBuffer = byteBuffer.asIntBuffer();
-                    intBuffer.put(new Random().nextInt(8));
+                    intBuffer.put(new Random().nextInt(ARGUMENT_VAL));
 
                     asyncSocketChannel.write(byteBuffer).get();
                 } else {
@@ -49,6 +51,7 @@ public class Client {
     public static void main(String[] args) {
         if (args.length > 0) {
             ARGUMENT_VAL = Integer.valueOf(args[0]);
+            MAX_DURATION = Integer.valueOf(args[1]);
         }
 
         new Client().run();
