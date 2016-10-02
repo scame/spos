@@ -8,8 +8,6 @@ import java.util.Scanner;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 
 
 public class ApplicationManager implements ServerListener {
@@ -21,12 +19,9 @@ public class ApplicationManager implements ServerListener {
 
     private final ScheduledExecutorService scheduledExecutor = Executors.newScheduledThreadPool(1);
 
-    // used to lock computation output till the prompt is closed
-    private final Lock promptLock = new ReentrantLock(true);
+    private enum PromptOptions {CONTINUE, CONTINUE_WITHOUT_PROMPT, CANCEL}
 
-    private enum PromptOptions { CONTINUE, CONTINUE_WITHOUT_PROMPT, CANCEL }
-
-    private enum CancellationMode { KEY_PRESS, PROMPT}
+    private enum CancellationMode {KEY_PRESS, PROMPT}
 
     private CancellationMode cancellationMode;
 
@@ -51,29 +46,24 @@ public class ApplicationManager implements ServerListener {
 
     @Override
     public void onCompletedComputation(int result, boolean isShortCircuited) {
-
-        promptLock.lock();
-        try {
-            if (isShortCircuited) {
-                System.out.println("result (short-circuit): " + result);
-            } else {
-                System.out.println("result: " + result);
-            }
-        } finally {
-            scheduledExecutor.shutdownNow();
-            promptLock.unlock();
+        if (isShortCircuited) {
+            System.out.print("result (short-circuit): " + result);
+        } else {
+            System.out.print("result: " + result);
         }
+
+        shutdownPromptExecutor();
     }
 
     @Override
     public void onFailureReported(String cause) {
+        System.out.print("failure caused by: " + cause);
+        shutdownPromptExecutor();
+    }
 
-        promptLock.lock();
-        try {
-            System.out.println("failure caused by: " + cause);
-        } finally {
+    private void shutdownPromptExecutor() {
+        if (!scheduledExecutor.isShutdown()){
             scheduledExecutor.shutdownNow();
-            promptLock.unlock();
         }
     }
 
@@ -84,7 +74,7 @@ public class ApplicationManager implements ServerListener {
 
     // gets called when the server was successfully started
     private void runClients() {
-       processesRunner.runProcesses(clientsNumber, 30, argumentVal);
+        processesRunner.runProcesses(clientsNumber, 10, argumentVal);
     }
 
     private void runInteractor() {
@@ -121,10 +111,7 @@ public class ApplicationManager implements ServerListener {
                 }
 
                 if (message != null && message.equals("q")) {
-                    // it's definitely bad if scheduler decides to reschedule here
-                    // because output lock happens only inside stopServer method
-                    // (trying to lock right after readLine procedure creates possibility of losing the result)
-                    server.stopServer();
+                    stopServer();
                     break;
                 }
             }
@@ -134,32 +121,43 @@ public class ApplicationManager implements ServerListener {
         thread.start();
     }
 
+    private void stopServer() {
+        if (Server.mutex.tryAcquire()) {
+            try {
+                server.stopServer();
+            } finally {
+                Server.mutex.release();
+            }
+        }
+    }
+
     private void runPromptScheduler() {
         scheduledExecutor.scheduleWithFixedDelay(this::displayPrompt, INITIAL_DELAY, SCHEDULER_PERIOD, TimeUnit.SECONDS);
     }
 
     private void displayPrompt() {
 
-        promptLock.lock();
-        try {
-            Scanner scanner = new Scanner(System.in);
+        if (Server.mutex.tryAcquire()) {
+            try {
+                Scanner scanner = new Scanner(System.in);
 
-            System.out.print("continue(1), continue without prompt(2), cancel(3): ");
-            int readValue = scanner.nextInt();
+                System.out.print("continue(1), continue without prompt(2), cancel(3): ");
+                int readValue = scanner.nextInt();
 
-            switch (readValue) {
-                case 1:
-                    handlePrompt(PromptOptions.CONTINUE);
-                    break;
-                case 2:
-                    handlePrompt(PromptOptions.CONTINUE_WITHOUT_PROMPT);
-                    break;
-                case 3:
-                    handlePrompt(PromptOptions.CANCEL);
-                    break;
+                switch (readValue) {
+                    case 1:
+                        handlePrompt(PromptOptions.CONTINUE);
+                        break;
+                    case 2:
+                        handlePrompt(PromptOptions.CONTINUE_WITHOUT_PROMPT);
+                        break;
+                    case 3:
+                        handlePrompt(PromptOptions.CANCEL);
+                        break;
+                }
+            } finally {
+                Server.mutex.release();
             }
-        } finally {
-            promptLock.unlock();
         }
     }
 

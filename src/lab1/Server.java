@@ -12,8 +12,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.*;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 
 import static lab1.Constants.*;
 
@@ -23,7 +21,7 @@ class Server {
 
     private static final Integer INTERRUPTION_VALUE = null;
 
-    private final Lock transferLock = new ReentrantLock();
+    static final Semaphore mutex = new Semaphore(1);
 
     private final List<Integer> valuesContainer = new ArrayList<>();
 
@@ -35,7 +33,10 @@ class Server {
 
     private Future<Void> serverFuture;
 
+    private Thread futuresConsumer;
+
     private int clientsNumber;
+
 
     Server(ServerListener serverListener, int clientsNumber) {
         this.clientsNumber = clientsNumber;
@@ -110,7 +111,7 @@ class Server {
     }
 
     private void runFuturesConsumer() {
-        new Thread(() -> {
+        futuresConsumer = new Thread(() -> {
             try {
                 while (true) {
                     Future<Integer> consumedFuture = completionService.take();
@@ -133,44 +134,42 @@ class Server {
                     }
                 }
             } catch (InterruptedException | ExecutionException e) {
-                e.printStackTrace();
+                e.getLocalizedMessage();
             }
-        }).start();
+        });
+
+        futuresConsumer.start();
     }
 
     private void transferResult(boolean isShortCircuited) {
-        if (transferLock.tryLock()) {
+        try {
+            mutex.acquire();
             try {
-                transferResult(isShortCircuited, null);
+                if (isShortCircuited) {
+                    serverListener.onCompletedComputation(SHORT_CIRCUIT_CONDITION, true);
+                } else {
+                    serverListener.onCompletedComputation(valuesContainer.stream()
+                            .reduce(1, (accumulator, elem) -> accumulator * elem), false);
+                }
             } finally {
                 cancelServerFuture();
-                transferLock.unlock();
+                mutex.release();
             }
+        } catch (InterruptedException e) {
+            e.getLocalizedMessage();
         }
     }
 
     void stopServer() {
-        if (transferLock.tryLock()) {
-            try {
-                transferResult(false, "stopped before the completion");
-            } finally {
-                cancelServerFuture();
-                transferLock.unlock();
-            }
+        if (!mutex.hasQueuedThreads() && !serverFuture.isCancelled()) {
+            serverListener.onFailureReported("stopped before the completion");
+
+            cancelServerFuture(); // cancels socketHandlerTasks if there are any running
+            futuresConsumer.interrupt(); // required when a mutex was acquired in transferResult,
+                                         // but stopServer check is already in the past
         }
     }
 
-    private void transferResult(boolean isShortCircuited, String failureReport) {
-
-        if (failureReport != null) {
-            serverListener.onFailureReported(failureReport);
-        } else if (isShortCircuited) {
-            serverListener.onCompletedComputation(SHORT_CIRCUIT_CONDITION, true);
-        } else {
-            serverListener.onCompletedComputation(valuesContainer.stream()
-                    .reduce(1, (accumulator, elem) -> accumulator * elem), false);
-        }
-    }
 
     @ThreadSafe // executor's implementation of Future interface guarantees thread-safety
     private void cancelServerFuture() {
