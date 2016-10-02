@@ -8,6 +8,8 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousServerSocketChannel;
 import java.nio.channels.AsynchronousSocketChannel;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.Lock;
@@ -23,7 +25,7 @@ class Server {
 
     private final Lock transferLock = new ReentrantLock();
 
-    private final CopyOnWriteArrayList<Integer> valuesContainer = new CopyOnWriteArrayList<>();
+    private final List<Integer> valuesContainer = new ArrayList<>();
 
     private final ExecutorService taskExecutor = Executors.newCachedThreadPool();
 
