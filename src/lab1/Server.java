@@ -17,47 +17,54 @@ import static lab1.Constants.*;
 
 class Server {
 
+    private static final int NO_RUNNING_THREADS = 0;
+
     private static final int SHORT_CIRCUIT_CONDITION = 0;
 
-    private static final Integer INTERRUPTION_VALUE = null;
+    private static final Integer POISON_KILL_VALUE = null;
 
-    static final Semaphore mutex = new Semaphore(1);
+    static final Semaphore binarySemaphore = new Semaphore(1);
 
-    private final List<Integer> valuesContainer = new ArrayList<>();
+    private final List<Integer> valuesContainer;
 
-    private final ExecutorService taskExecutor = Executors.newCachedThreadPool();
+    private final ExecutorService taskExecutor;
 
-    private final CompletionService<Integer> completionService = new ExecutorCompletionService<>(taskExecutor);
+    private final CompletionService<Integer> completionService;
+
+    private final ExecutorService consumerService;
+
+    private final ExecutorService serverService;
 
     private ServerListener serverListener;
 
-    private Future<Void> serverFuture;
-
-    private Thread futuresConsumer;
-
     private int clientsNumber;
 
-
     Server(ServerListener serverListener, int clientsNumber) {
+        valuesContainer = new ArrayList<>();
+        taskExecutor = Executors.newCachedThreadPool();
+        completionService = new ExecutorCompletionService<>(taskExecutor);
+        consumerService = Executors.newFixedThreadPool(1);
+        serverService = Executors.newFixedThreadPool(1);
+
         this.clientsNumber = clientsNumber;
         this.serverListener = serverListener;
     }
 
     void runServer() {
-        runFuturesConsumer();
-        serverFuture = taskExecutor.submit(this::handleServerSocket);
+        if (Objects.equals(((ThreadPoolExecutor) serverService).getActiveCount(), NO_RUNNING_THREADS)) {
+            serverService.submit(this::handleServerSocket);
+            runFuturesConsumer();
+        }
     }
 
-    private Void handleServerSocket() {
+    private void handleServerSocket() {
         try (AsynchronousServerSocketChannel asyncServerSocket = AsynchronousServerSocketChannel.open()) {
             if (asyncServerSocket.isOpen()) {
-
                 asyncServerSocket.bind(new InetSocketAddress(IP, PORT));
                 serverListener.onServerStarted();
 
                 while (true) {
                     Future<AsynchronousSocketChannel> asyncSocket = asyncServerSocket.accept();
-
                     try {
                         completionService.submit(createSocketHandlerTask(asyncSocket.get()));
                     } catch (InterruptedException | ExecutionException e) {
@@ -65,16 +72,12 @@ class Server {
                         break;
                     }
                 }
-
             } else {
                 System.out.println("server socket channel can't be opened");
             }
-
         } catch (IOException e) {
             e.printStackTrace();
         }
-
-        return null;
     }
 
     private Callable<Integer> createSocketHandlerTask(AsynchronousSocketChannel asyncSocket) {
@@ -82,13 +85,11 @@ class Server {
     }
 
     private Integer handleSocketChannel(AsynchronousSocketChannel asyncSocket) {
-
         ByteBuffer byteBuffer = ByteBuffer.allocateDirect(BUFFER_SIZE);
-
         try {
             prepareBuffer(asyncSocket, byteBuffer);
         } catch (InterruptedException | ExecutionException e) {
-            return INTERRUPTION_VALUE;
+            return POISON_KILL_VALUE;
         } finally {
             closeClientSocket(asyncSocket);
         }
@@ -111,39 +112,38 @@ class Server {
     }
 
     private void runFuturesConsumer() {
-        futuresConsumer = new Thread(() -> {
-            try {
-                while (true) {
-                    Future<Integer> consumedFuture = completionService.take();
-                    Integer consumedValue = consumedFuture.get();
+        if (Objects.equals(((ThreadPoolExecutor) consumerService).getActiveCount(), NO_RUNNING_THREADS)) {
+            consumerService.submit(() -> {
+                try {
+                    while (true) {
+                        Future<Integer> consumedFuture = completionService.take();
+                        Integer consumedValue = consumedFuture.get();
 
-                    if (Objects.equals(consumedValue, INTERRUPTION_VALUE)) {
-                        break;  // clients were interrupted, stop futures consuming
-                    }           // happens after cancelServerFuture procedure call
+                        if (Objects.equals(consumedValue, POISON_KILL_VALUE)) {
+                            break;
+                        } else {
+                            valuesContainer.add(consumedValue);
+                        }
 
-                    valuesContainer.add(consumedValue);
-
-                    if (consumedValue == SHORT_CIRCUIT_CONDITION) {
-                        transferResult(true);
-                        break;
+                        if (Objects.equals(consumedValue, SHORT_CIRCUIT_CONDITION)) {
+                            transferResult(true);
+                            break;
+                        }
+                        if ((Objects.equals(valuesContainer.size(), clientsNumber))) {
+                            transferResult(false);
+                            break;
+                        }
                     }
-
-                    if (valuesContainer.size() == clientsNumber) {
-                        transferResult(false);
-                        break;
-                    }
+                } catch (InterruptedException | ExecutionException e) {
+                    e.getLocalizedMessage();
                 }
-            } catch (InterruptedException | ExecutionException e) {
-                e.getLocalizedMessage();
-            }
-        });
-
-        futuresConsumer.start();
+            });
+        }
     }
 
     private void transferResult(boolean isShortCircuited) {
         try {
-            mutex.acquire();
+            binarySemaphore.acquire();
             try {
                 if (isShortCircuited) {
                     serverListener.onCompletedComputation(SHORT_CIRCUIT_CONDITION, true);
@@ -152,8 +152,8 @@ class Server {
                             .reduce(1, (accumulator, elem) -> accumulator * elem), false);
                 }
             } finally {
-                cancelServerFuture();
-                mutex.release();
+                shutdownExecutors();
+                binarySemaphore.release();
             }
         } catch (InterruptedException e) {
             e.getLocalizedMessage();
@@ -161,20 +161,15 @@ class Server {
     }
 
     void stopServer() {
-        if (!mutex.hasQueuedThreads() && !serverFuture.isCancelled()) {
-            serverListener.onFailureReported("stopped before the completion");
-
-            cancelServerFuture(); // cancels socketHandlerTasks if there are any running
-            futuresConsumer.interrupt(); // required when a mutex was acquired in transferResult,
-                                         // but stopServer check is already in the past
+        if (!binarySemaphore.hasQueuedThreads()) {
+            shutdownExecutors();
+            serverListener.onCancellationReported();
         }
     }
 
-
-    @ThreadSafe // executor's implementation of Future interface guarantees thread-safety
-    private void cancelServerFuture() {
-        if (!serverFuture.isCancelled()) {
-            serverFuture.cancel(true);
-        }
+    @ThreadSafe
+    private void shutdownExecutors() {
+        if (!serverService.isShutdown()) serverService.shutdownNow();
+        if (!consumerService.isShutdown()) consumerService.shutdownNow();
     }
 }

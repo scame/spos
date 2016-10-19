@@ -5,7 +5,7 @@ interface ServerListener {
 
     void onServerStarted();
 
-    void onFailureReported(String cause);
+    void onCancellationReported();
 
     void onCompletedComputation(int result, boolean isShortCircuited);
 }

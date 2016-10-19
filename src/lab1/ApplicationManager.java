@@ -4,22 +4,26 @@ package lab1;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.util.Objects;
 import java.util.Scanner;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
+import static lab1.Server.binarySemaphore;
 
 public class ApplicationManager implements ServerListener {
 
-    private static final int SCHEDULER_PERIOD = 3;
+    private static final int NO_RUNNING_THREADS = 0;
+
+    private static final int MAX_DURATION = 25; // just for testing
+
+    private static final int SCHEDULING_PERIOD = 3;
     private static final int INITIAL_DELAY = 3;
 
-    private final ChildProcessesRunner processesRunner = new ChildProcessesRunner();
+    private final ChildProcessesRunner processesRunner;
 
-    private final ScheduledExecutorService scheduledExecutor = Executors.newScheduledThreadPool(1);
+    private final ScheduledExecutorService scheduledExecutor;
 
-    private enum PromptOptions {CONTINUE, CONTINUE_WITHOUT_PROMPT, CANCEL}
+    private final ExecutorService daemonService;
 
     private enum CancellationMode {KEY_PRESS, PROMPT}
 
@@ -31,17 +35,28 @@ public class ApplicationManager implements ServerListener {
 
     private Server server;
 
+    public ApplicationManager() {
+        daemonService = Executors.newFixedThreadPool(1, runnable -> {
+            Thread thread = Executors.defaultThreadFactory().newThread(runnable);
+            thread.setDaemon(true);
+            return thread;
+        });
+
+        scheduledExecutor = Executors.newScheduledThreadPool(1);
+        processesRunner = new ChildProcessesRunner();
+    }
+
     public static void main(String[] args) throws IOException, InterruptedException {
         ApplicationManager appManager = new ApplicationManager();
 
         appManager.runInteractor();
         appManager.runServer();
-        appManager.runCancellationModeHandler();
     }
 
     @Override
     public void onServerStarted() {
-        runClients();
+        processesRunner.runChildProcesses(clientsNumber, MAX_DURATION, argumentVal);
+        runCancellationModeHandler();
     }
 
     @Override
@@ -52,19 +67,13 @@ public class ApplicationManager implements ServerListener {
             System.out.print("result: " + result);
         }
 
-        shutdownPromptExecutor();
+        scheduledExecutor.shutdownNow();
     }
 
     @Override
-    public void onFailureReported(String cause) {
-        System.out.print("failure caused by: " + cause);
-        shutdownPromptExecutor();
-    }
-
-    private void shutdownPromptExecutor() {
-        if (!scheduledExecutor.isShutdown()){
-            scheduledExecutor.shutdownNow();
-        }
+    public void onCancellationReported() {
+        System.out.print("Successfully cancelled execution");
+        scheduledExecutor.shutdownNow();
     }
 
     private void runServer() {
@@ -72,16 +81,12 @@ public class ApplicationManager implements ServerListener {
         server.runServer();
     }
 
-    // gets called when the server was successfully started
-    private void runClients() {
-        processesRunner.runProcesses(clientsNumber, 10, argumentVal);
-    }
-
+    // incorrect input isn't handled
     private void runInteractor() {
         Scanner scanner = new Scanner(System.in);
 
-        System.out.printf("cancellation mode (1 - btn press, 2 - prompt): ");
-        cancellationMode = (scanner.nextInt() == 1 ? CancellationMode.KEY_PRESS : CancellationMode.PROMPT);
+        System.out.print("cancellation mode (1 - btn press, 2 - prompt): ");
+        cancellationMode = (Objects.equals(scanner.nextInt(), 1) ? CancellationMode.KEY_PRESS : CancellationMode.PROMPT);
         scanner.nextLine();
         System.out.print("number of functions: ");
         clientsNumber = scanner.nextInt();
@@ -91,53 +96,58 @@ public class ApplicationManager implements ServerListener {
     }
 
     private void runCancellationModeHandler() {
-        if (cancellationMode == CancellationMode.KEY_PRESS) {
+        if (Objects.equals(cancellationMode, CancellationMode.KEY_PRESS)) {
             runKeyPressDaemon();
-        } else if (cancellationMode == CancellationMode.PROMPT) {
+        } else if (Objects.equals(cancellationMode, CancellationMode.PROMPT)) {
             runPromptScheduler();
         }
     }
 
     private void runKeyPressDaemon() {
-        Thread thread = new Thread(() -> {
-            BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(System.in));
+        if (Objects.equals(((ThreadPoolExecutor)daemonService).getActiveCount(), NO_RUNNING_THREADS)) {
+            daemonService.submit(this::runKeyPressListener);
+        }
+    }
 
-            String message = null;
-            while (true) {
-                try {
-                    message = bufferedReader.readLine();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
+    private void runKeyPressListener() {
+        BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(System.in));
 
-                if (message != null && message.equals("q")) {
-                    stopServer();
-                    break;
-                }
+        String message = null;
+        while (true) {
+            try {
+                message = bufferedReader.readLine();
+            } catch (IOException e) {
+                e.printStackTrace();
             }
-        });
 
-        thread.setDaemon(true);
-        thread.start();
+            if (message != null && message.equals("q")) {
+                // dangerous place, but a user simply will be thinking that he was too slow
+                stopServer();
+                break;
+            }
+        }
     }
 
     private void stopServer() {
-        if (Server.mutex.tryAcquire()) {
+        if (binarySemaphore.tryAcquire()) {
             try {
                 server.stopServer();
             } finally {
-                Server.mutex.release();
+                binarySemaphore.release();
             }
         }
     }
 
     private void runPromptScheduler() {
-        scheduledExecutor.scheduleWithFixedDelay(this::displayPrompt, INITIAL_DELAY, SCHEDULER_PERIOD, TimeUnit.SECONDS);
+        if (Objects.equals(((ThreadPoolExecutor) scheduledExecutor).getActiveCount(), NO_RUNNING_THREADS)) {
+            scheduledExecutor.scheduleWithFixedDelay(this::displayPrompt, INITIAL_DELAY,
+                    SCHEDULING_PERIOD, TimeUnit.SECONDS);
+        }
     }
 
+    // incorrect input isn't handled
     private void displayPrompt() {
-
-        if (Server.mutex.tryAcquire()) {
+        if (binarySemaphore.tryAcquire()) {
             try {
                 Scanner scanner = new Scanner(System.in);
 
@@ -146,31 +156,19 @@ public class ApplicationManager implements ServerListener {
 
                 switch (readValue) {
                     case 1:
-                        handlePrompt(PromptOptions.CONTINUE);
                         break;
                     case 2:
-                        handlePrompt(PromptOptions.CONTINUE_WITHOUT_PROMPT);
+                        scheduledExecutor.shutdownNow();
                         break;
                     case 3:
-                        handlePrompt(PromptOptions.CANCEL);
+                        server.stopServer();
                         break;
+                    default:
+                        System.out.println("input mismatch, be careful next time");
                 }
             } finally {
-                Server.mutex.release();
+                binarySemaphore.release();
             }
-        }
-    }
-
-    private void handlePrompt(PromptOptions promptOptions) {
-        switch (promptOptions) {
-            case CONTINUE:
-                break;
-            case CONTINUE_WITHOUT_PROMPT:
-                scheduledExecutor.shutdownNow();
-                break;
-            case CANCEL:
-                server.stopServer();
-                break;
         }
     }
 }
