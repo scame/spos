@@ -47,9 +47,9 @@ public class ChildProcess {
 
             int read = is.read(buf);
             System.out.println("Server says: " + new String(buf, 0, read));
+            double computationResult = func.compute(ByteBuffer.wrap(buf).getDouble());
 
             byte[] responseBuffer = new byte[128];
-            double computationResult = func.compute(ByteBuffer.wrap(buf).getDouble());
             ByteBuffer.wrap(responseBuffer).putDouble(computationResult);
             os.write(responseBuffer);
             os.flush();
