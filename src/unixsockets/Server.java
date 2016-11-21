@@ -27,7 +27,7 @@ public class Server {
 
     private static final int CLIENTS_NUMBER = 2;
 
-    private final ExecutorService connectionsListenerService = Executors.newSingleThreadExecutor();
+    private final ExecutorService serverService = Executors.newSingleThreadExecutor();
 
     private final ExecutorService resultsProcessingService = Executors.newCachedThreadPool();
 
@@ -43,32 +43,38 @@ public class Server {
         this.applicationHandler = applicationHandler;
     }
 
-    void runServer() throws IOException {
+    void runApp() throws IOException {
+        resultsProcessingService.submit(this::startResultsProcessing);
+        serverService.submit(this::runServer);
+    }
+
+    private void runServer() {
         try (AFUNIXServerSocket server = AFUNIXServerSocket.newInstance()) {
             server.bind(new AFUNIXSocketAddress(socketFile));
             System.out.println("server: " + server);
-            applicationHandler.runChildProcesses();
 
-            connectionsListenerService.submit(() -> runConnectionListener(server));
-            resultsProcessingService.submit(this::startResultsProcessing);
+            new Thread(applicationHandler::runChildProcesses).start();
+            runConnectionListener(server);
+        } catch (IOException e) {
+            System.out.println(e.getLocalizedMessage());
         }
     }
 
     private void runConnectionListener(AFUNIXServerSocket server) {
-        while (true) {
+        while (!Thread.interrupted()) {
             System.out.println("Waiting for connection...");
             try {
-                try (Socket sock = server.accept()) {
-                    System.out.println("Connected: " + sock);
+                Socket sock = server.accept();
+                System.out.println("Connected: " + sock);
+                clientsExecutor.submit(() -> invokeClientHandler(sock));
 
-                    clientsExecutor.submit(() -> invokeClientHandler(sock));
-                }
             } catch (IOException e) {
                 clientsExecutor.shutdownNow();
                 closeServerSocket(server);
                 System.out.println(e.getLocalizedMessage());
             }
         }
+        System.out.println("interrupted");
     }
 
     private void closeServerSocket(AFUNIXServerSocket serverSocket) {
@@ -82,7 +88,8 @@ public class Server {
     private void startResultsProcessing() {
         try {
             latch.await();
-            applicationHandler.printOutput("Result of computation: " + resultsList.get(0) + resultsList.get(1));
+            double res = resultsList.get(0) + resultsList.get(1);
+            applicationHandler.printOutput("Result of computation: " + res);
         } catch (InterruptedException e) {
             System.out.println(e.getLocalizedMessage());
         }
@@ -96,8 +103,9 @@ public class Server {
             processResponse(is);
             latch.countDown();
         } catch (IOException e) {
-            closeClientSocket(clientSocket);
             System.out.println(e.getLocalizedMessage());
+        } finally {
+            closeClientSocket(clientSocket);
         }
     }
 
@@ -112,9 +120,9 @@ public class Server {
     private void processResponse(InputStream is) throws IOException {
         byte[] responseWrapper = new byte[BUFF_SIZE];
         int read = is.read(responseWrapper);
-        System.out.println("Client's response: " + new String(responseWrapper, 0, read));
 
         resultsList.add(ByteBuffer.wrap(responseWrapper).getDouble());
+        System.out.println(resultsList.get(resultsList.size() - 1));
     }
 
     private void closeClientSocket(Socket clientSocket) {
@@ -128,7 +136,7 @@ public class Server {
     void stopRunning() {
         if (latch.getCount() != 0) {
             applicationHandler.printOutput("Cancelled");
-            connectionsListenerService.shutdownNow();
+            serverService.shutdownNow();
             resultsProcessingService.shutdownNow();
         }
     }

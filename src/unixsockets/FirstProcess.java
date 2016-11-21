@@ -12,7 +12,7 @@ public class FirstProcess extends ChildProcess {
 
     public static void main(String[] args) throws IOException {
         if (args.length > 0) {
-            new FirstProcess(new File(new File(args[PROPERTY_INDEX]), args[SOCKET_INDEX])).runProcess(Math::cos);
+            new FirstProcess(new File(new File(System.getProperty(args[PROPERTY_INDEX])), args[SOCKET_INDEX])).runProcess(Math::cos);
         }
     }
 }
