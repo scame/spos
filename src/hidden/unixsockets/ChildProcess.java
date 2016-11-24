@@ -1,4 +1,4 @@
-package unixsockets;
+package hidden.unixsockets;
 
 
 import org.newsclub.net.unix.AFUNIXSocket;

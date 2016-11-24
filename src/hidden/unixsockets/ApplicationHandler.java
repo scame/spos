@@ -1,4 +1,4 @@
-package unixsockets;
+package hidden.unixsockets;
 
 
 import java.io.BufferedReader;
@@ -44,6 +44,7 @@ public class ApplicationHandler {
             mutex.lockInterruptibly();
             try {
                 System.out.println(output);
+                scheduledExecutor.shutdownNow();
             } finally {
                 mutex.unlock();
             }
@@ -67,8 +68,8 @@ public class ApplicationHandler {
     }
 
     void runChildProcesses() {
-        runChildProcess("unixsockets/FirstProcess");
-        runChildProcess("unixsockets/SecondProcess");
+        runChildProcess("hidden/unixsockets/FirstProcess");
+        runChildProcess("hidden/unixsockets/SecondProcess");
         runCancellationModeHandler();
     }
 

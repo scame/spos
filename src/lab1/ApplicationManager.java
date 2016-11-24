@@ -145,9 +145,12 @@ public class ApplicationManager implements ServerListener {
         }
     }
 
-    // incorrect input isn't handled
+    // tryAcquire has been changed to plain acquire
+    // if this method is called when the lock was acquired in Server's transferResult the prompt won't be displayed afterward
+    // (scheduled executor will be closed and InterruptedException will be thrown)
     private void displayPrompt() {
-        if (binarySemaphore.tryAcquire()) {
+        try {
+            binarySemaphore.acquire();
             try {
                 Scanner scanner = new Scanner(System.in);
 
@@ -169,6 +172,8 @@ public class ApplicationManager implements ServerListener {
             } finally {
                 binarySemaphore.release();
             }
+        } catch (InterruptedException e) {
+            System.out.println(e.getLocalizedMessage());
         }
     }
 }

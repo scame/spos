@@ -1,4 +1,4 @@
-package unixsockets;
+package hidden.unixsockets;
 
 
 import org.newsclub.net.unix.AFUNIXServerSocket;
@@ -39,6 +39,8 @@ public class Server {
 
     private final List<Double> resultsList = Collections.synchronizedList(new ArrayList<>());
 
+    private AFUNIXServerSocket server;
+
     public Server(ApplicationHandler applicationHandler) {
         this.applicationHandler = applicationHandler;
     }
@@ -51,6 +53,7 @@ public class Server {
     private void runServer() {
         try (AFUNIXServerSocket server = AFUNIXServerSocket.newInstance()) {
             server.bind(new AFUNIXSocketAddress(socketFile));
+            this.server = server;
             System.out.println("server: " + server);
 
             new Thread(applicationHandler::runChildProcesses).start();
@@ -69,6 +72,7 @@ public class Server {
                 clientsExecutor.submit(() -> invokeClientHandler(sock));
 
             } catch (IOException e) {
+                System.out.println("Server is shut down");
                 clientsExecutor.shutdownNow();
                 closeServerSocket(server);
                 System.out.println(e.getLocalizedMessage());
@@ -90,7 +94,12 @@ public class Server {
             latch.await();
             double res = resultsList.get(0) + resultsList.get(1);
             applicationHandler.printOutput("Result of computation: " + res);
+
+            closeServerSocket(server);
+            resultsProcessingService.shutdownNow();
+            System.out.println("kinda interrupted");
         } catch (InterruptedException e) {
+            System.out.println("Result processing was interrupted");
             System.out.println(e.getLocalizedMessage());
         }
     }
@@ -136,7 +145,7 @@ public class Server {
     void stopRunning() {
         if (latch.getCount() != 0) {
             applicationHandler.printOutput("Cancelled");
-            serverService.shutdownNow();
+            closeServerSocket(server);
             resultsProcessingService.shutdownNow();
         }
     }
