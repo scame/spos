@@ -22,8 +22,6 @@ class Server {
 
     static final Semaphore binarySemaphore = new Semaphore(1);
 
-    private final ExecutorService taskExecutor;
-
     private final ExecutorService consumerService;
 
     private final ExecutorService serverService;
@@ -35,7 +33,6 @@ class Server {
     private int clientsNumber;
 
     Server(ServerListener serverListener, int clientsNumber) {
-        taskExecutor = Executors.newCachedThreadPool();
         consumerService = Executors.newFixedThreadPool(1);
         serverService = Executors.newFixedThreadPool(1);
         resultsQueue = new ArrayBlockingQueue<>(clientsNumber);
@@ -57,13 +54,12 @@ class Server {
                 asyncServerSocket.bind(new InetSocketAddress(IP, PORT));
                 serverListener.onServerStarted();
 
-                while (true) {
+                while (!Thread.interrupted()) {
                     Future<AsynchronousSocketChannel> asyncSocket = asyncServerSocket.accept();
                     try {
-                        taskExecutor.submit(handleSocketChannel(asyncSocket.get()));
+                        handleSocketChannel(asyncSocket.get());
                     } catch (InterruptedException | ExecutionException e) {
-                        taskExecutor.shutdownNow();
-                        break;
+                        System.out.println(e.getLocalizedMessage());
                     }
                 }
             } else {
@@ -74,10 +70,6 @@ class Server {
         }
     }
 
-    private Runnable handleSocketChannel(AsynchronousSocketChannel asyncSocket) {
-        return () -> prepareBuffer(asyncSocket);
-    }
-
     private void closeClientSocket(AsynchronousSocketChannel asyncSocket) {
         try {
             asyncSocket.close();
@@ -86,8 +78,9 @@ class Server {
         }
     }
 
-    private void prepareBuffer(AsynchronousSocketChannel socket) {
+    private void handleSocketChannel(AsynchronousSocketChannel socket) {
         ByteBuffer byteBuffer = ByteBuffer.allocateDirect(BUFFER_SIZE);
+
         socket.read(byteBuffer, null, new CompletionHandler<Integer, Object>() {
             @Override
             public void completed(Integer integer, Object o) {
