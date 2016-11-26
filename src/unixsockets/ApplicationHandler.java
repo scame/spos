@@ -1,4 +1,4 @@
-package hidden.unixsockets;
+package unixsockets;
 
 
 import java.io.BufferedReader;
@@ -68,8 +68,8 @@ public class ApplicationHandler {
     }
 
     void runChildProcesses() {
-        runChildProcess("hidden/unixsockets/FirstProcess");
-        runChildProcess("hidden/unixsockets/SecondProcess");
+        runChildProcess("unixsockets/FirstProcess");
+        runChildProcess("unixsockets/SecondProcess");
         runCancellationModeHandler();
     }
 

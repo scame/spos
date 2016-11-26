@@ -1,4 +1,4 @@
-package hidden.unixsockets;
+package unixsockets;
 
 
 import org.newsclub.net.unix.AFUNIXServerSocket;
@@ -11,15 +11,18 @@ import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class Server {
 
     private static final File socketFile = new File(new File(System.getProperty("java.io.tmpdir")), "junixsocket-test.sock");
+
+    private static final int SHORT_CIRCUIT_VAL = 0;
 
     private static final int BUFF_SIZE = 128;
 
@@ -37,7 +40,11 @@ public class Server {
 
     private final CountDownLatch latch = new CountDownLatch(CLIENTS_NUMBER);
 
-    private final List<Double> resultsList = Collections.synchronizedList(new ArrayList<>());
+    private final List<Double> resultsList = new ArrayList<>();
+
+    private final Lock outputProcessingLock = new ReentrantLock();
+
+    private boolean isShortCircuited;
 
     private AFUNIXServerSocket server;
 
@@ -89,15 +96,24 @@ public class Server {
         }
     }
 
+    // TODO: add doubles rounding
     private void startResultsProcessing() {
         try {
             latch.await();
-            double res = resultsList.get(0) + resultsList.get(1);
-            applicationHandler.printOutput("Result of computation: " + res);
+            outputProcessingLock.lock();
+            try {
+                if (resultsList.get(0) == 0 || resultsList.get(1) == 0) {
+                    applicationHandler.printOutput("Short-circuit: 0");
+                } else {
+                    double res = resultsList.get(0) + resultsList.get(1);
+                    applicationHandler.printOutput("Result of computation: " + res);
+                }
+            } finally {
+                outputProcessingLock.unlock();
+            }
 
             closeServerSocket(server);
             resultsProcessingService.shutdownNow();
-            System.out.println("kinda interrupted");
         } catch (InterruptedException e) {
             System.out.println("Result processing was interrupted");
             System.out.println(e.getLocalizedMessage());
@@ -110,7 +126,6 @@ public class Server {
 
             sendArgument(os);
             processResponse(is);
-            latch.countDown();
         } catch (IOException e) {
             System.out.println(e.getLocalizedMessage());
         } finally {
@@ -130,8 +145,24 @@ public class Server {
         byte[] responseWrapper = new byte[BUFF_SIZE];
         int read = is.read(responseWrapper);
 
-        resultsList.add(ByteBuffer.wrap(responseWrapper).getDouble());
-        System.out.println(resultsList.get(resultsList.size() - 1));
+        outputProcessingLock.lock();
+        try {
+            if (!isShortCircuited) {
+                resultsList.add(ByteBuffer.wrap(responseWrapper).getDouble());
+                checkShortCircuitCondition();
+                latch.countDown();
+            }
+        } finally {
+            outputProcessingLock.unlock();
+        }
+    }
+
+    private void checkShortCircuitCondition() {
+        if (resultsList.get(resultsList.size() - 1) == SHORT_CIRCUIT_VAL && resultsList.size() == 1) {
+            isShortCircuited = true;
+            resultsList.add(0.0);
+            latch.countDown();
+        }
     }
 
     private void closeClientSocket(Socket clientSocket) {

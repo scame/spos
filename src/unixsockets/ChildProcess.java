@@ -1,4 +1,4 @@
-package hidden.unixsockets;
+package unixsockets;
 
 
 import org.newsclub.net.unix.AFUNIXSocket;
@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.util.concurrent.TimeUnit;
 
 public class ChildProcess {
 
@@ -50,8 +51,13 @@ public class ChildProcess {
             System.out.println(computationResult);
             byte[] responseBuffer = new byte[128];
             ByteBuffer.wrap(responseBuffer).putDouble(computationResult);
+
+            TimeUnit.SECONDS.sleep(5);
+
             os.write(responseBuffer);
             os.flush();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
         }
     }
 }

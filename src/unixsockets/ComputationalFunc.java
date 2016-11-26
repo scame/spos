@@ -1,4 +1,4 @@
-package hidden.unixsockets;
+package unixsockets;
 
 
 public interface ComputationalFunc {
