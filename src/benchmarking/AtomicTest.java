@@ -17,10 +17,11 @@ public class AtomicTest extends Accumulator {
     @Override
     protected void accumulate() {
         int i = index.getAndIncrement();
-        value.getAndAdd(preLoaded[i]);
-        if (++i >= SIZE) {
+        if (i >= SIZE / 2) {
             index.set(0);
+            i = index.getAndIncrement();
         }
+        value.getAndAdd(preLoaded[i]);
     }
 
     @Override

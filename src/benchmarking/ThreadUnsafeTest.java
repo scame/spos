@@ -1,6 +1,6 @@
 package benchmarking;
 
-
+// isn't reliable, but gives rough performance estimate
 public class ThreadUnsafeTest extends Accumulator {
 
     {
@@ -9,10 +9,10 @@ public class ThreadUnsafeTest extends Accumulator {
 
     @Override
     protected void accumulate() {
-        value += preLoaded[index++];
-        if (index >= SIZE) {
+        if (index >= SIZE / 2) {
             index = 0;
         }
+        value += preLoaded[index++];
     }
 
     @Override
