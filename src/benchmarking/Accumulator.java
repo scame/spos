@@ -2,10 +2,7 @@ package benchmarking;
 
 
 import java.util.Random;
-import java.util.concurrent.BrokenBarrierException;
-import java.util.concurrent.CyclicBarrier;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 
 public abstract class Accumulator {
 
@@ -100,5 +97,9 @@ public abstract class Accumulator {
 
     public static int getCYCLES() {
         return CYCLES;
+    }
+
+    public static void stopAccumulating() {
+        executorService.shutdown();
     }
 }
