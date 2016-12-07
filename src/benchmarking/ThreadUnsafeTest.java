@@ -1,6 +1,7 @@
 package benchmarking;
 
-// isn't reliable, but gives rough performance estimate
+// isn't reliable (increment in java isn't Atomic, indexing problem, addition also isn't atomic)
+// but gives rough performance estimate
 public class ThreadUnsafeTest extends Accumulator {
 
     {
