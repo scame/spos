@@ -1,6 +1,5 @@
 package dekker;
 
-
 import jcip.ThreadSafe;
 
 import java.util.ArrayList;
@@ -56,31 +55,28 @@ public abstract class FixnumLockImpl implements FixnumLock {
     private boolean tryRegister() {
         if (freeIdExists()) {
             threadId.set(getFreeId());
-            return threadsIdList.set(threadId.get(), true);
+            threadsIdList.set(threadId.get(), true);
+            return true;
         }
         return false;
     }
 
     private boolean freeIdExists() {
-        boolean freeIdFlag = false;
-
         for (boolean idFlag : threadsIdList) {
             if (!idFlag) {
-                freeIdFlag = true;
+                return true;
             }
         }
-        return freeIdFlag;
+        return false;
     }
 
     private int getFreeId() {
-        int freeId = -1;
-
         for (int i = 0; i < threadsNumber; i++) {
             if (!threadsIdList.get(i)) {
-                freeId = i;
+                return i;
             }
         }
-        return freeId;
+        return -1;
     }
 
     /**

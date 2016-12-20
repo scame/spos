@@ -10,7 +10,7 @@ public class DekkerLock extends FixnumLockImpl {
 
     private final List<Boolean> wantCS = Arrays.asList(false, false);
 
-    private int turn = 1;
+    private volatile int turn = 1;
 
     public DekkerLock() {
         super(numberOfThreads);

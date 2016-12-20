@@ -5,13 +5,15 @@ import jcip.NotThreadSafe;
 
 public class RaceConditionDemonstration {
 
-    private static final int NUMBER_OF_ITERATIONS = 1_000_000;
+    private static final int NUMBER_OF_ITERATIONS = 1_000_00;
 
     private volatile long counter;
 
     private Thread firstThread;
 
     private Thread secondThread;
+
+    private DekkerLock dekkerLock = new DekkerLock();
 
     @NotThreadSafe
     private void increment() throws InterruptedException {
