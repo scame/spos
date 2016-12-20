@@ -12,13 +12,18 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public abstract class FixnumLockImpl implements FixnumLock {
 
-    private int threadsNumber = 2;
+    private final int threadsNumber;
 
-    private final List<Boolean> threadsIdList = new ArrayList<>(threadsNumber);
+    private final List<Boolean> threadsIdList;
 
     private final Lock lock = new ReentrantLock(true);
 
     private int threadId = -1;
+
+    public FixnumLockImpl(int threadsNumber) {
+        this.threadsNumber = threadsNumber;
+        this.threadsIdList = new ArrayList<>(threadsNumber);
+    }
 
     @Override
     public int getId() {
@@ -48,7 +53,7 @@ public abstract class FixnumLockImpl implements FixnumLock {
         boolean freeIdFlag = false;
 
         for (boolean idFlag : threadsIdList) {
-            if (idFlag) {
+            if (!idFlag) {
                 freeIdFlag = true;
             }
         }
@@ -66,11 +71,17 @@ public abstract class FixnumLockImpl implements FixnumLock {
         return freeId;
     }
 
+    /**
+     * should be called in the end of critical section
+     * API user ought to use this method only after successful register call
+     */
+
     @ThreadSafe
     @Override
     public void unregister() {
         lock.lock();
         try {
+            checkBounds();
             threadsIdList.set(threadId, false);
             resetId();
         } finally {
@@ -78,8 +89,18 @@ public abstract class FixnumLockImpl implements FixnumLock {
         }
     }
 
+    private void checkBounds() {
+        if (threadId == -1) {
+            try {
+                throw new IllegalAccessException("no registered threads");
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
     private void resetId() {
-        threadId = -1;
+        threadId = getFreeId();
     }
 
     @Override
@@ -104,9 +125,5 @@ public abstract class FixnumLockImpl implements FixnumLock {
 
     public int getThreadsNumber() {
         return threadsNumber;
-    }
-
-    public void setThreadsNumber(int threadsNumber) {
-        this.threadsNumber = threadsNumber;
     }
 }
