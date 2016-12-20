@@ -14,20 +14,32 @@ public abstract class FixnumLockImpl implements FixnumLock {
 
     private final int threadsNumber;
 
-    private final List<Boolean> threadsIdList;
-
     private final Lock lock = new ReentrantLock(true);
 
-    private int threadId = -1;
+    protected final List<Boolean> threadsIdList;
+
+    private ThreadLocal<Integer> threadId = new ThreadLocal<Integer>() {
+        @Override
+        protected Integer initialValue() {
+            return -1;
+        }
+    };
 
     public FixnumLockImpl(int threadsNumber) {
         this.threadsNumber = threadsNumber;
         this.threadsIdList = new ArrayList<>(threadsNumber);
+        initIdsList();
+    }
+
+    private void initIdsList() {
+        for (int i = 0; i < threadsNumber; i++) {
+            threadsIdList.add(false);
+        }
     }
 
     @Override
     public int getId() {
-        return threadId;
+        return threadId.get();
     }
 
     @ThreadSafe
@@ -43,8 +55,8 @@ public abstract class FixnumLockImpl implements FixnumLock {
 
     private boolean tryRegister() {
         if (freeIdExists()) {
-            threadId = getFreeId();
-            return threadsIdList.set(threadId, true);
+            threadId.set(getFreeId());
+            return threadsIdList.set(threadId.get(), true);
         }
         return false;
     }
@@ -73,7 +85,7 @@ public abstract class FixnumLockImpl implements FixnumLock {
 
     /**
      * should be called in the end of critical section
-     * API user ought to use this method only after successful register call
+     * API user ought to use this method only after a successful register call
      */
 
     @ThreadSafe
@@ -81,18 +93,18 @@ public abstract class FixnumLockImpl implements FixnumLock {
     public void unregister() {
         lock.lock();
         try {
-            checkBounds();
-            threadsIdList.set(threadId, false);
+            checkRegistration();
+            threadsIdList.set(threadId.get(), false);
             resetId();
         } finally {
             lock.unlock();
         }
     }
 
-    private void checkBounds() {
-        if (threadId == -1) {
+    private void checkRegistration() {
+        if (threadId.get() == -1) {
             try {
-                throw new IllegalAccessException("no registered threads");
+                throw new IllegalAccessException("thread wasn't registered");
             } catch (IllegalAccessException e) {
                 e.printStackTrace();
             }
@@ -100,7 +112,7 @@ public abstract class FixnumLockImpl implements FixnumLock {
     }
 
     private void resetId() {
-        threadId = getFreeId();
+        threadId.set(-1);
     }
 
     @Override
