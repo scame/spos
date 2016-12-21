@@ -10,7 +10,7 @@ public abstract class Accumulator {
 
     protected volatile long value;
 
-    protected long duration;
+    protected double duration;
 
     protected String description;
 
@@ -69,7 +69,7 @@ public abstract class Accumulator {
     }
 
     public void test() {
-        long start = System.nanoTime();
+        double start = System.currentTimeMillis();
 
         for (int i = 0; i < CONTENTION_NUMBER; i++) {
             executorService.submit(new Writer());
@@ -80,14 +80,14 @@ public abstract class Accumulator {
         } catch (InterruptedException | BrokenBarrierException e) {
             System.out.println(e.getLocalizedMessage());
         }
-        duration = System.nanoTime() - start;
-        System.out.printf("%-12s: %12d\n", description, duration);
+        duration = System.currentTimeMillis() - start;
+        System.out.printf("%-25s: %.3f\n", description, duration / 1000);
     }
 
     public static void compare(Accumulator firstAccumulator, Accumulator secondAccumulator) {
-        System.out.printf("%-20s: %.2f\n",
+        System.out.printf("%-35s : %.2f\n",
                 firstAccumulator.description + "/" + secondAccumulator.description,
-                (double) firstAccumulator.duration / secondAccumulator.duration
+                firstAccumulator.duration / secondAccumulator.duration
         );
     }
 

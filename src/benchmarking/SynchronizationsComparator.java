@@ -3,7 +3,7 @@ package benchmarking;
 
 public class SynchronizationsComparator {
 
-    private static final int ITERATIONS = 5;
+    private static final int ITERATIONS = 6;
 
     private static final AtomicTest atomicTest = new AtomicTest();
     private static final LockTest lockTest = new LockTest();
@@ -13,7 +13,7 @@ public class SynchronizationsComparator {
     private static final SemaphoreTest semaphoreTest = new SemaphoreTest();
 
     private static void test() {
-        System.out.printf("%-12s : %12d\n", "Cycles", Accumulator.getCYCLES());
+        System.out.printf("%-12s : %2d\n", "\nCycles", Accumulator.getCYCLES());
 
         lockTest.test();
         spinLockTest.test();
